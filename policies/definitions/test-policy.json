@@ -1,0 +1,18 @@
+{
+  "properties": {
+    "displayName": "Test Policy",
+    "policyType": "Custom",
+    "mode": "All",
+    "description": "Sample test policy",
+    "parameters": {},
+    "policyRule": {
+      "if": {
+        "field": "location",
+        "notIn": ["westeurope"]
+      },
+      "then": {
+        "effect": "deny"
+      }
+    }
+  }
+}
