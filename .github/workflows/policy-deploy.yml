@@ -22,20 +22,6 @@ jobs:
         sudo apt-get install -y jq
         az extension add --name managementgroups --yes || true
 
-    - name: Initial Azure Login (home tenant)
-      uses: azure/login@v2
-      with:
-        auth-type: SERVICE_PRINCIPAL
-        client-id: ${{ secrets.APP_CLIENT_ID }}
-        tenant-id: ${{ secrets.APP_TENANT_ID }}
-        client-secret: ${{ secrets.APP_CLIENT_SECRET }}
-        allow-no-subscriptions: true
-
-    - name: Verify initial login
-      run: |
-        echo "Home tenant login successful"
-        az account show --query "{name:name, tenantId:tenantId, user:user}" -o json
-
     - name: Deploy policies to all tenants
       env:
         APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
@@ -54,7 +40,7 @@ jobs:
           mgId=$(echo "$t" | jq -r '.rootMG')
           echo "----> Processing tenant: $tenantId (MG: $mgId)"
 
-          # Manual login to each tenant using SPN
+          # Manual SPN login to tenant
           az account clear
           az login --service-principal -u "$APP_CLIENT_ID" -p "$APP_CLIENT_SECRET" --tenant "$tenantId"
 
