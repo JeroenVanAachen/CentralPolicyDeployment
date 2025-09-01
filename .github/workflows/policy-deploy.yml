@@ -1,22 +1,28 @@
-name: Central Policy Deploy (test)
+name: Central Policy Deployment (Multi-Tenant)
 
 on:
-  workflow_dispatch:   # manual trigger for first tests
+  workflow_dispatch:   # Manual trigger for testing
   push:
-    branches: [ main ]
+    branches: [ main ] # Optional auto-trigger on push
 
 permissions:
-  contents: read       # allow checkout
+  contents: read       # Required for checkout
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Azure Login (SPN)
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y jq
+        az extension add --name managementgroups --yes || true
+
+    - name: Initial Azure Login (home tenant)
       uses: azure/login@v2
       with:
         auth-type: SERVICE_PRINCIPAL
@@ -25,57 +31,47 @@ jobs:
         client-secret: ${{ secrets.APP_CLIENT_SECRET }}
         allow-no-subscriptions: true
 
-    - name: Install helper tools
+    - name: Verify initial login
       run: |
-        sudo apt-get update -y
-        sudo apt-get install -y jq
-        # managementgroups extension used for MG operations
-        az extension add --name managementgroups --yes || true
-
-    - name: Verify current login (home tenant)
-      run: |
-        echo "Logged in to home tenant (should be your app's tenant)"
+        echo "Home tenant login successful"
         az account show --query "{name:name, tenantId:tenantId, user:user}" -o json
 
-    - name: Deploy sample policy to tenants (loop)
+    - name: Deploy policies to all tenants
       env:
         APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
         APP_CLIENT_SECRET: ${{ secrets.APP_CLIENT_SECRET }}
       run: |
         set -euo pipefail
         TENANTS_FILE="${GITHUB_WORKSPACE}/tenants.json"
+
         if [ ! -f "$TENANTS_FILE" ]; then
           echo "tenants.json not found at $TENANTS_FILE"
           exit 1
         fi
 
-        # iterate each tenant object in tenants.json
         jq -c '.[]' "$TENANTS_FILE" | while read -r t; do
           tenantId=$(echo "$t" | jq -r '.tenantId')
           mgId=$(echo "$t" | jq -r '.rootMG')
-          echo "----> switching to tenant: $tenantId (MG: $mgId)"
+          echo "----> Processing tenant: $tenantId (MG: $mgId)"
 
-          # clear any previous login state, then login specifically to target tenant
+          # Manual login to each tenant using SPN
           az account clear
-          az login --service-principal -u "$APP_CLIENT_ID" -p "$APP_CLIENT_SECRET" --tenant "$tenantId" >/dev/null
+          az login --service-principal -u "$APP_CLIENT_ID" -p "$APP_CLIENT_SECRET" --tenant "$tenantId"
 
-          # verify we are in the expected tenant
+          # Verify login
           currentTenant=$(az account show --query tenantId -o tsv)
           if [ "$currentTenant" != "$tenantId" ]; then
-            echo "ERROR: failed to authenticate to tenant $tenantId (currentTenant=$currentTenant)"
+            echo "ERROR: failed to authenticate to tenant $tenantId"
             exit 1
           fi
+          echo "Authenticated into tenant $tenantId"
 
-          echo "Authenticated into tenant $tenantId. Now you can run az commands (example below)."
-
-          # Example: check that the management group exists
-          az account management-group show --name "$mgId" --query "name" -o tsv || echo "MG $mgId not found (or no permission)"
-
-          # Example: idempotent create-or-update for each policy definition file
+          # Deploy each policy definition
           for file in policies/definitions/*.json; do
             [ -f "$file" ] || continue
             defName=$(basename "$file" .json)
-            echo " -> ensuring policy definition $defName in MG $mgId"
+            echo " -> Creating/updating policy definition $defName in MG $mgId"
+
             exists=$(az policy definition show --name "$defName" --management-group "$mgId" -o json 2>/dev/null || true)
             if [ -z "$exists" ]; then
               az policy definition create \
@@ -92,5 +88,5 @@ jobs:
             fi
           done
 
-          echo "----> done for tenant $tenantId"
+          echo "----> Finished tenant $tenantId"
         done
