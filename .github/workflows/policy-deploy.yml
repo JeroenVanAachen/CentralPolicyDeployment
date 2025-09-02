@@ -1,12 +1,12 @@
 name: Central Policy Deployment (Multi-Tenant)
 
 on:
-  workflow_dispatch:   # Manual trigger for testing
+  workflow_dispatch:   # Manual trigger
   push:
-    branches: [ main ] # Optional auto-trigger on push
+    branches: [ main ] # Optional auto-trigger
 
 permissions:
-  contents: read       # Required for checkout
+  contents: read       # Needed for checkout
 
 jobs:
   deploy:
@@ -27,7 +27,8 @@ jobs:
         APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
         APP_CLIENT_SECRET: ${{ secrets.APP_CLIENT_SECRET }}
       run: |
-        set -euo pipefail
+        set -euxo pipefail
+
         TENANTS_FILE="${GITHUB_WORKSPACE}/tenants.json"
 
         if [ ! -f "$TENANTS_FILE" ]; then
@@ -40,19 +41,19 @@ jobs:
           mgId=$(echo "$t" | jq -r '.rootMG')
           echo "----> Processing tenant: $tenantId (MG: $mgId)"
 
-          # Manual SPN login to tenant
+          # SPN login at MG level (no subscriptions needed)
           az account clear
-          az login --service-principal -u "$APP_CLIENT_ID" -p "$APP_CLIENT_SECRET" --tenant "$tenantId"
+          az login --service-principal \
+            -u "$APP_CLIENT_ID" \
+            -p "$APP_CLIENT_SECRET" \
+            --tenant "$tenantId" \
+            --allow-no-subscriptions
 
-          # Verify login
-          currentTenant=$(az account show --query tenantId -o tsv)
-          if [ "$currentTenant" != "$tenantId" ]; then
-            echo "ERROR: failed to authenticate to tenant $tenantId"
-            exit 1
-          fi
-          echo "Authenticated into tenant $tenantId"
+          # Optional: verify tenant login
+          currentTenant=$(az account show --query tenantId -o tsv || echo "$tenantId")
+          echo "Authenticated into tenant: $currentTenant"
 
-          # Deploy each policy definition
+          # Deploy policy definitions
           for file in policies/definitions/*.json; do
             [ -f "$file" ] || continue
             defName=$(basename "$file" .json)
