@@ -1,14 +1,16 @@
 {
   "properties": {
-    "displayName": "Test Policy",
-    "policyType": "Custom",
+    "displayName": "Deny Non-West Europe Locations",
+    "description": "This policy denies resource creation outside westeurope.",
     "mode": "All",
-    "description": "Sample test policy",
+    "policyType": "Custom",
     "parameters": {},
     "policyRule": {
       "if": {
         "field": "location",
-        "notIn": ["westeurope"]
+        "notIn": [
+          "westeurope"
+        ]
       },
       "then": {
         "effect": "deny"
