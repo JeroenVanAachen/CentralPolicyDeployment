@@ -23,6 +23,9 @@ jobs:
         az extension add --name managementgroups --yes || true
 
     - name: Deploy policies
+      env:
+        AZURE_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+        AZURE_CLIENT_SECRET: ${{ secrets.APP_CLIENT_SECRET }}
       run: |
         set -euxo pipefail
         TENANTS_FILE=tenants.json
