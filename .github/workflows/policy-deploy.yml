@@ -16,8 +16,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup Azure CLI
-        uses: Azure/setup-azure-cli@v2
+      - name: Install Azure CLI
+        run: |
+          set -euxo pipefail
+          # Install Azure CLI manually
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          az version
 
       - name: Deploy policies to tenants
         run: |
@@ -34,3 +38,45 @@ jobs:
           jq -c '.[]' "$TENANTS_FILE" | while read -r t; do
             tenantId=$(echo "$t" | jq -r .tenantId)
             mgId=$(echo "$t" | jq -r .rootMG)
+
+            echo "----> Processing tenant: $tenantId (MG: $mgId)"
+            az account clear
+            az login --service-principal \
+              --username "$CLIENT_ID" \
+              --password "$CLIENT_SECRET" \
+              --tenant "$tenantId" \
+              --allow-no-subscriptions
+
+            echo "Authenticated into tenant: $(az account show --query tenantId -o tsv)"
+
+            # Loop through all policy JSON files
+            for file in policies/definitions/*.json; do
+              if [ -f "$file" ]; then
+                defName=$(basename "$file" .json)
+                echo " -> Creating/updating policy definition $defName in MG $mgId"
+
+                rules=$(jq -c '.properties.policyRule' "$file")
+                displayName=$(jq -r '.properties.displayName' "$file")
+                description=$(jq -r '.properties.description' "$file")
+                mode=$(jq -r '.properties.mode' "$file")
+
+                if az policy definition show --name "$defName" --management-group "$mgId" -o none 2>/dev/null; then
+                  az policy definition update \
+                    --name "$defName" \
+                    --rules "$rules" \
+                    --display-name "$displayName" \
+                    --description "$description" \
+                    --mode "$mode" \
+                    --management-group "$mgId"
+                else
+                  az policy definition create \
+                    --name "$defName" \
+                    --rules "$rules" \
+                    --display-name "$displayName" \
+                    --description "$description" \
+                    --mode "$mode" \
+                    --management-group "$mgId"
+                fi
+              fi
+            done
+          done
