@@ -1,65 +1,78 @@
-name: Central Policy Deployment (Multi-Tenant)
+name: Central Policy Deployment
 
 on:
-  workflow_dispatch:   # Manual trigger
   push:
-    branches: [ main ] # Optional auto-trigger
-
-permissions:
-  contents: read       # Needed for checkout
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
+    env:
+      CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.APP_CLIENT_SECRET }}
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update -y
-        sudo apt-get install -y jq
-        az extension add --name managementgroups --yes || true
+      - name: Setup Azure CLI
+        uses: azure/setup-azure-cli@v3
 
-    - name: Deploy policies
-      env:
-        CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
-        CLIENT_SECRET: ${{ secrets.APP_CLIENT_SECRET }}
-      run: |
-        set -euxo pipefail
-        TENANTS_FILE=tenants.json
+      - name: Deploy policies
+        run: |
+          set -euxo pipefail
 
-        jq -c '.[]' "$TENANTS_FILE" | while read -r t; do
-          tenantId=$(echo "$t" | jq -r .tenantId)
-          mgId=$(echo "$t" | jq -r .rootMG)
+          TENANTS_FILE=tenants.json
 
-          echo "----> Processing tenant: $tenantId (MG: $mgId)"
-          az account clear
-          az login --service-principal \
-            --username "$CLIENT_ID" \
-            --password "$CLIENT_SECRET" \
-            --tenant "$tenantId" \
-            --allow-no-subscriptions
-          
-          echo "Authenticated into tenant: $(az account show --query tenantId -o tsv)"
+          if [ ! -f "$TENANTS_FILE" ]; then
+            echo "Missing tenants.json!"
+            exit 1
+          fi
 
-          for file in policies/definitions/*.json; do
-            if [ -f "$file" ]; then
-              defName=$(basename "$file" .json)
-              echo " -> Creating/updating policy definition $defName in MG $mgId"
+          # Loop through each tenant
+          jq -c '.[]' "$TENANTS_FILE" | while read -r t; do
+            tenantId=$(echo "$t" | jq -r .tenantId)
+            mgId=$(echo "$t" | jq -r .rootMG)
 
-              if az policy definition show --name "$defName" --management-group "$mgId" -o none 2>/dev/null; then
-                az policy definition update \
-                  --name "$defName" \
-                  --definition "$file" \
-                  --management-group "$mgId"
-              else
-                az policy definition create \
-                  --name "$defName" \
-                  --definition "$file" \
-                  --management-group "$mgId"
+            echo "----> Processing tenant: $tenantId (MG: $mgId)"
+            az account clear
+            az login --service-principal \
+              --username "$CLIENT_ID" \
+              --password "$CLIENT_SECRET" \
+              --tenant "$tenantId" \
+              --allow-no-subscriptions
+
+            echo "Authenticated into tenant: $(az account show --query tenantId -o tsv)"
+
+            # Loop through all policy JSON files
+            for file in policies/definitions/*.json; do
+              if [ -f "$file" ]; then
+                defName=$(basename "$file" .json)
+                echo " -> Creating/updating policy definition $defName in MG $mgId"
+
+                rules=$(jq -c '.properties.policyRule' "$file")
+                displayName=$(jq -r '.properties.displayName' "$file")
+                description=$(jq -r '.properties.description' "$file")
+                mode=$(jq -r '.properties.mode' "$file")
+
+                if az policy definition show --name "$defName" --management-group "$mgId" -o none 2>/dev/null; then
+                  az policy definition update \
+                    --name "$defName" \
+                    --rules "$rules" \
+                    --display-name "$displayName" \
+                    --description "$description" \
+                    --mode "$mode" \
+                    --management-group "$mgId"
+                else
+                  az policy definition create \
+                    --name "$defName" \
+                    --rules "$rules" \
+                    --display-name "$displayName" \
+                    --description "$description" \
+                    --mode "$mode" \
+                    --management-group "$mgId"
+                fi
               fi
-            fi
+            done
           done
-        done
