@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Setup Azure CLI
-        uses: azure/setup-azure-cli@v2
+        uses: Azure/setup-azure-cli@v2
 
       - name: Deploy policies to tenants
         run: |
