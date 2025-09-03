@@ -8,9 +8,7 @@
     "policyRule": {
       "if": {
         "field": "location",
-        "notIn": [
-          "westeurope"
-        ]
+        "notIn": ["westeurope"]
       },
       "then": {
         "effect": "deny"

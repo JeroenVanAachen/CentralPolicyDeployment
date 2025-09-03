@@ -22,58 +22,47 @@ jobs:
         sudo apt-get install -y jq
         az extension add --name managementgroups --yes || true
 
-    - name: Deploy policies to all tenants
-      env:
-        APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
-        APP_CLIENT_SECRET: ${{ secrets.APP_CLIENT_SECRET }}
+    - name: Deploy policies
       run: |
         set -euxo pipefail
-
-        TENANTS_FILE="${GITHUB_WORKSPACE}/tenants.json"
+        TENANTS_FILE=tenants.json
 
         if [ ! -f "$TENANTS_FILE" ]; then
-          echo "tenants.json not found at $TENANTS_FILE"
+          echo "Missing tenants.json!"
           exit 1
         fi
 
         jq -c '.[]' "$TENANTS_FILE" | while read -r t; do
-          tenantId=$(echo "$t" | jq -r '.tenantId')
-          mgId=$(echo "$t" | jq -r '.rootMG')
-          echo "----> Processing tenant: $tenantId (MG: $mgId)"
+          tenantId=$(echo "$t" | jq -r .tenantId)
+          mgId=$(echo "$t" | jq -r .rootMG)
 
-          # SPN login at MG level (no subscriptions needed)
+          echo "----> Processing tenant: $tenantId (MG: $mgId)"
           az account clear
           az login --service-principal \
-            -u "$APP_CLIENT_ID" \
-            -p "$APP_CLIENT_SECRET" \
-            --tenant "$tenantId" \
+            -u ${{ secrets.AZURE_CLIENT_ID }} \
+            -p ${{ secrets.AZURE_CLIENT_SECRET }} \
+            --tenant $tenantId \
             --allow-no-subscriptions
 
-          # Optional: verify tenant login
-          currentTenant=$(az account show --query tenantId -o tsv || echo "$tenantId")
+          currentTenant=$(az account show --query tenantId -o tsv)
           echo "Authenticated into tenant: $currentTenant"
 
-          # Deploy policy definitions
           for file in policies/definitions/*.json; do
-            [ -f "$file" ] || continue
-            defName=$(basename "$file" .json)
-            echo " -> Creating/updating policy definition $defName in MG $mgId"
+            if [ -f "$file" ]; then
+              defName=$(basename "$file" .json)
+              echo " -> Creating/updating policy definition $defName in MG $mgId"
 
-            exists=$(az policy definition show --name "$defName" --management-group "$mgId" -o json 2>/dev/null || true)
-            if [ -z "$exists" ]; then
-              az policy definition create \
-                --name "$defName" \
-                --display-name "$defName" \
-                --rules "$file" \
-                --mode All \
-                --management-group "$mgId"
-            else
-              az policy definition update \
-                --name "$defName" \
-                --rules "$file" \
-                --management-group "$mgId"
+              if az policy definition show --name "$defName" --management-group "$mgId" -o none 2>/dev/null; then
+                az policy definition update \
+                  --name "$defName" \
+                  --definition "$file" \
+                  --management-group "$mgId"
+              else
+                az policy definition create \
+                  --name "$defName" \
+                  --definition "$file" \
+                  --management-group "$mgId"
+              fi
             fi
           done
-
-          echo "----> Finished tenant $tenantId"
         done
