@@ -1,10 +1,10 @@
 [
   {
     "tenantId": "a64e29a5-97e1-4c5b-84b8-7292a53f5f2c",
-    "targetMG": "officecoo"
+    "rootMG": "officecoo"
   },
   {
     "tenantId": "8329d687-d35d-447e-9d8d-8214d9405653",
-    "targetMG": "test"
+    "rootMG": "test"
   }
 ]
